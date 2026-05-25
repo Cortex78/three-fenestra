@@ -78,26 +78,28 @@ Deno.serve(async (req: Request) => {
 
     const fileBytes = new Uint8Array(await file.arrayBuffer());
 
-    // In production: use Sharp-WASM to:
-    //   1. Decode image
-    //   2. Resize to 1024×1024 (preserving aspect via letterbox)
-    //   3. Encode as WebP quality 92
-    //   4. Generate 128×128 thumbnail
-    //
-    // For this implementation we pass through as-is and rely on
-    // the storage bucket's image transformation API for thumbnails.
+    // Pass original bytes through — Supabase Storage serves with correct Content-Type.
+    // Map MIME type → file extension for the storage path.
+    const mimeToExt: Record<string, string> = {
+      'image/jpeg': 'jpg',
+      'image/png':  'png',
+      'image/webp': 'webp',
+      'image/avif': 'avif',
+    };
+    const ext          = mimeToExt[file.type] ?? 'jpg';
     const processedBytes = fileBytes;
+    const contentType    = file.type;  // keep original MIME so browsers decode correctly
 
     // Upload full-res
     const textureId   = crypto.randomUUID();
-    const fullPath    = `textures/${user.id}/${textureId}/full.webp`;
-    const thumbPath   = `textures/${user.id}/${textureId}/thumb.webp`;
+    const fullPath    = `textures/${user.id}/${textureId}/full.${ext}`;
+    const thumbPath   = `textures/${user.id}/${textureId}/thumb.${ext}`;
 
     const { error: fullUploadError } = await supabase.storage
       .from('textures')
       .upload(fullPath, processedBytes, {
-        contentType: 'image/webp',
-        upsert:      false,
+        contentType,
+        upsert: false,
       });
 
     if (fullUploadError) throw new Error(`Upload failed: ${fullUploadError.message}`);

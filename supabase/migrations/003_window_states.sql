@@ -196,20 +196,25 @@ CREATE TRIGGER trg_window_states_version
 -- client can retry with fresh data.
 -- ─────────────────────────────────────────────────────────────
 CREATE OR REPLACE FUNCTION update_window_state(
-  p_window_id       uuid,
-  p_user_id         uuid,
-  p_state           jsonb,
-  p_expected_version bigint DEFAULT NULL  -- null = unconditional (first write / admin)
+  p_window_id        uuid,
+  p_state            jsonb,
+  p_expected_version bigint DEFAULT NULL  -- null = unconditional (first write)
 )
 RETURNS window_states
 LANGUAGE plpgsql
-SECURITY DEFINER  -- runs as postgres, but we check ownership manually
+SECURITY DEFINER  -- runs as postgres; reads caller identity from auth.uid()
 AS $$
 DECLARE
   v_result       window_states;
+  v_caller_id    uuid := auth.uid();  -- JWT-verified caller; cannot be spoofed
   v_owner_id     uuid;
   v_current_ver  bigint;
 BEGIN
+  IF v_caller_id IS NULL THEN
+    RAISE EXCEPTION 'Not authenticated'
+      USING ERRCODE = 'insufficient_privilege';
+  END IF;
+
   -- ① Check window ownership
   SELECT owner_user_id INTO v_owner_id
   FROM windows
@@ -221,10 +226,10 @@ BEGIN
   END IF;
 
   IF v_owner_id IS NULL THEN
-    -- Unowned window: the first writer auto-claims it (first-come ownership).
-    UPDATE windows SET owner_user_id = p_user_id WHERE id = p_window_id;
-  ELSIF v_owner_id IS DISTINCT FROM p_user_id THEN
-    RAISE EXCEPTION 'User % does not own window %', p_user_id, p_window_id
+    -- Unowned window: first writer auto-claims it (first-come ownership).
+    UPDATE windows SET owner_user_id = v_caller_id WHERE id = p_window_id;
+  ELSIF v_owner_id IS DISTINCT FROM v_caller_id THEN
+    RAISE EXCEPTION 'User % does not own window %', v_caller_id, p_window_id
       USING ERRCODE = 'insufficient_privilege';
   END IF;
 
@@ -255,7 +260,7 @@ BEGIN
     glass_smudge_strength, is_lit, is_locked, theme, custom_metadata
   )
   VALUES (
-    p_window_id, p_user_id,
+    p_window_id, v_caller_id,
     p_state->>'back_atlas_url',
     p_state->>'front_atlas_url',
     p_state->>'front_normal_url',

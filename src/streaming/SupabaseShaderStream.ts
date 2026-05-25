@@ -178,6 +178,18 @@ export class SupabaseShaderStream {
       })
       .subscribe((status) => {
         this.log(`Channel building:${buildingId} → ${status}`);
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          // Reconnect after 3 s — keeps realtime alive through transient drops
+          setTimeout(() => {
+            if (this.channels.has(buildingId)) {
+              this.log(`Reconnecting channel for building ${buildingId}…`);
+              this.supabase.removeChannel(channel).then(() => {
+                this.channels.delete(buildingId);
+                this.subscribeTo(buildingId, async () => { /* skip re-hydration on reconnect */ });
+              });
+            }
+          }, 3_000);
+        }
       });
 
     this.channels.set(buildingId, channel);
@@ -249,9 +261,8 @@ export class SupabaseShaderStream {
     expectedVersion?: number,
   ): Promise<WindowStateRow> {
     const { data, error } = await this.supabase.rpc('update_window_state', {
-      p_window_id:       windowId,
-      p_user_id:         await this.getUserId(),
-      p_state:           this.toSnakeCase(state),
+      p_window_id:        windowId,
+      p_state:            this.toSnakeCase(state),
       p_expected_version: expectedVersion ?? null,
     });
 
