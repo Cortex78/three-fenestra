@@ -159,9 +159,21 @@ export class SupabaseShaderStream {
       })
       // ── Presence ──
       .on('presence', { event: 'sync' }, () => {
-        const presences = Object.values(
+        // presenceState() returns { [presenceKey]: PresencePayload[] }.
+        // Flatten, then deduplicate by userId — a single user can appear more
+        // than once if track() was called before the server merged the entries,
+        // or if a stale socket reconnected. Keep the most-recently-joined entry.
+        const raw = Object.values(
           channel.presenceState<PresencePayload>(),
         ).flat();
+        const byUser = new Map<string, PresencePayload>();
+        for (const p of raw) {
+          const existing = byUser.get(p.userId);
+          if (!existing || p.joinedAt > existing.joinedAt) {
+            byUser.set(p.userId, p);
+          }
+        }
+        const presences = [...byUser.values()];
         this.presenceCallbacks.forEach((cb) => cb(presences));
       })
       .subscribe((status) => {
