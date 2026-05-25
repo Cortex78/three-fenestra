@@ -3,8 +3,8 @@ import { resolve } from 'node:path';
 
 export default defineConfig({
   test: {
-    // Use jsdom so DOM globals (EventTarget, URL, etc.) are available
-    environment: 'jsdom',
+    // Use happy-dom — faster than jsdom and no ESM/CJS compatibility issues
+    environment: 'happy-dom',
 
     // Only run files in __tests__/ directories inside src/
     include: ['src/**/__tests__/**/*.test.ts'],

@@ -97,17 +97,17 @@ Verify in Dashboard → **Edge Functions** that all three show status **Active**
 ### 7. Set secrets
 
 ```bash
-# Required only for AI texture generation
-supabase secrets set GOOGLE_IMAGEN_API_KEY=your-google-ai-studio-key
+# Required only for AI texture generation (Google Gemini)
+supabase secrets set GEMINI_API_KEY=your-google-ai-studio-key
 
 # Alternative: Stability AI
 supabase secrets set STABILITY_AI_API_KEY=your-stability-key
 supabase secrets set GENERATOR_PROVIDER=stability-ai
 ```
 
-To get a Google Imagen 3 API key:
+To get a Gemini API key:
 1. [Google AI Studio](https://aistudio.google.com/app/apikey) → Create API key
-2. The key must have the `Generative Language API` permission
+2. The key must have the `Generative Language API` permission enabled in Google Cloud Console
 
 ### 8. Configure the streaming demo
 
@@ -178,8 +178,8 @@ This runs `supabase/migrations/*.sql` in order and then `supabase/seed.sql`.
 ```bash
 # Create local secrets file
 cat > supabase/.env.local <<EOF
-GOOGLE_IMAGEN_API_KEY=your-key-if-testing-ai
-GENERATOR_PROVIDER=google-imagen-3
+GEMINI_API_KEY=your-key-if-testing-ai
+GENERATOR_PROVIDER=google-gemini
 EOF
 
 supabase functions serve --env-file supabase/.env.local
@@ -362,4 +362,4 @@ This means two clients are writing the same window concurrently. The `window-sta
 
 1. Check Edge Function logs: Dashboard → **Edge Functions** → `generate-pbr-textures` → Logs.
 2. Verify the secret is set: `supabase secrets list`.
-3. For Google Imagen: confirm the API key has the `Generative Language API` permission in [Google Cloud Console](https://console.cloud.google.com/apis/credentials).
+3. For Google Gemini: confirm the API key has the `Generative Language API` permission in [Google Cloud Console](https://console.cloud.google.com/apis/credentials).
