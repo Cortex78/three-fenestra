@@ -220,7 +220,10 @@ BEGIN
       USING ERRCODE = 'no_data_found';
   END IF;
 
-  IF v_owner_id IS DISTINCT FROM p_user_id THEN
+  IF v_owner_id IS NULL THEN
+    -- Unowned window: the first writer auto-claims it (first-come ownership).
+    UPDATE windows SET owner_user_id = p_user_id WHERE id = p_window_id;
+  ELSIF v_owner_id IS DISTINCT FROM p_user_id THEN
     RAISE EXCEPTION 'User % does not own window %', p_user_id, p_window_id
       USING ERRCODE = 'insufficient_privilege';
   END IF;
