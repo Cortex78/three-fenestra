@@ -389,7 +389,7 @@ supabase functions deploy process-texture-upload
 supabase functions deploy window-state-sync
 
 # 5. Set AI provider secret (optional — only needed for AI generation)
-supabase secrets set GOOGLE_IMAGEN_API_KEY=your-key-here
+supabase secrets set GEMINI_API_KEY=your-google-ai-studio-key
 # or for Stability AI:
 supabase secrets set STABILITY_AI_API_KEY=your-key-here GENERATOR_PROVIDER=stability-ai
 ```
@@ -463,7 +463,7 @@ Supported AI providers (set `GENERATOR_PROVIDER` environment variable):
 
 | Provider | Env var value | Quality |
 |---|---|---|
-| Google Imagen 3 | `google-imagen-3` (default) | Best photorealism |
+| Google Gemini 2.0 Flash | `google-gemini` (default) | Fast, multimodal, no waitlist |
 | Stability AI SDXL | `stability-ai` | Open weights, self-hostable |
 
 ### Streaming API reference

@@ -16,3 +16,11 @@ assets/header/preview-*.png
 # Copyrighted source assets used only as a starting reference — must never
 # be committed or shipped. We work from derived textures (e.g. room-test.png).
 examples/asia-building/textures/rooms.jpg
+
+# Local env files (contain real keys — use .env.example as template)
+.env.local
+.env.*.local
+**/.env.local
+
+# Supabase CLI temp artifacts
+supabase/.temp/
