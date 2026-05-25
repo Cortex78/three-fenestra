@@ -21,6 +21,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./streaming": {
+      "types": "./dist/streaming/index.d.ts",
+      "import": "./dist/streaming/index.js"
+    },
     "./starter/*": "./starter/*"
   },
   "files": [
@@ -59,5 +63,13 @@
   ],
   "dependencies": {
     "tweakpane": "^4.0.5"
+  },
+  "optionalDependencies": {
+    "@supabase/supabase-js": "^2.43.0"
+  },
+  "peerDependenciesMeta": {
+    "@supabase/supabase-js": {
+      "optional": true
+    }
   }
 }
