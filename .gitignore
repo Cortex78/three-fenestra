@@ -1,0 +1,18 @@
+node_modules
+dist
+dist-demo
+.vite
+.DS_Store
+*.log
+# Headless-capture intermediates (final outputs in assets/ are tracked).
+assets/.frames-tmp
+assets/.header-frames-tmp
+assets/.header-raw.mp4
+assets/.video-tmp
+# Comparison-only / diagnostic asset outputs (kept locally, never shipped).
+assets/header-cinematic.gif
+assets/header/preview-*.png
+
+# Copyrighted source assets used only as a starting reference — must never
+# be committed or shipped. We work from derived textures (e.g. room-test.png).
+examples/asia-building/textures/rooms.jpg

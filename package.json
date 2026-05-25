@@ -1,0 +1,63 @@
+{
+  "name": "three-fenestra",
+  "version": "0.2.0",
+  "description": "Three.js plugin: interior mapping shader with optional PBR front layer. Drop-in MeshStandardMaterial subclass usable in vanilla Three.js and React Three Fiber.",
+  "author": "Edgar Pérez <codedgar.dev@gmail.com> (https://github.com/codedgar)",
+  "license": "MIT",
+  "homepage": "https://github.com/codedgar/three-fenestra#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/codedgar/three-fenestra.git"
+  },
+  "bugs": {
+    "url": "https://github.com/codedgar/three-fenestra/issues"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./starter/*": "./starter/*"
+  },
+  "files": [
+    "dist",
+    "src",
+    "starter",
+    "README.md"
+  ],
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build && tsc -p tsconfig.build.json",
+    "build:demo": "vite build --mode demo && node scripts/copy-demo-assets.mjs",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run typecheck && npm run build"
+  },
+  "peerDependencies": {
+    "three": ">=0.150.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.160.0",
+    "playwright": "^1.60.0",
+    "three": "^0.160.0",
+    "typescript": "^5.4.0",
+    "vite": "^5.2.0"
+  },
+  "keywords": [
+    "three",
+    "threejs",
+    "shader",
+    "interior-mapping",
+    "fenestra",
+    "windows",
+    "facade",
+    "pbr",
+    "r3f"
+  ],
+  "dependencies": {
+    "tweakpane": "^4.0.5"
+  }
+}

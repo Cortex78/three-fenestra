@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Three Fenestra — header</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Stalinist+One&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --fg: #ffffff;
+      --fg-muted: rgba(255, 255, 255, 0.72);
+      --fg-faint: rgba(255, 255, 255, 0.55);
+      --amber: #F5B544;            /* picks up the lit-window glow */
+      --amber-soft: rgba(245, 181, 68, 0.32);
+      --squircle-fill: rgba(18, 20, 26, 0.28);
+      --squircle-stroke: rgba(255, 230, 190, 0.32); /* warm-tinted hairline */
+      --text-shadow: 0 1px 2px rgba(0,0,0,0.55), 0 0 24px rgba(0,0,0,0.45);
+    }
+
+    html, body {
+      margin: 0; height: 100%;
+      background: #000;
+      overflow: hidden;
+      color: var(--fg);
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Background video. */
+    .bg {
+      position: fixed; inset: 0;
+      width: 100%; height: 100%;
+      object-fit: cover;
+      z-index: 0;
+    }
+
+    /* Two-layer dark wash:
+       1. Corner vignette  (cinematic edge fall-off)
+       2. Soft mid-band     (gives the centred foreground breathing room
+          without flattening the image into a "card on a screenshot") */
+    .vignette {
+      position: fixed; inset: 0;
+      pointer-events: none;
+      background:
+        radial-gradient(ellipse 60% 45% at center,
+          rgba(0,0,0,0.55) 0%,
+          rgba(0,0,0,0.18) 55%,
+          rgba(0,0,0,0)    85%),
+        radial-gradient(ellipse at center,
+          rgba(0,0,0,0)   40%,
+          rgba(0,0,0,0.55) 100%);
+      z-index: 1;
+    }
+
+    /* Amber hairline at the very bottom — carries the visual language from
+       the microdownloader banner. */
+    .hairline {
+      position: fixed;
+      left: 0; right: 0; bottom: 0; height: 1px;
+      background: linear-gradient(90deg,
+        rgba(245,181,68,0) 0%,
+        rgba(245,181,68,0.6) 50%,
+        rgba(245,181,68,0) 100%);
+      z-index: 2;
+    }
+
+    /* Foreground group, centered. The group itself does the slow parallax
+       drift (counter to the rising camera) over the full 10 s. */
+    .header {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 40px;
+      z-index: 3;
+      animation: groupDrift 10000ms linear forwards;
+      will-change: transform;
+    }
+    @keyframes groupDrift {
+      from { transform: translateY(-10px); }
+      to   { transform: translateY( 10px); }
+    }
+
+    /* ─── Squircle (frosted glass) ────────────────────────────────────── */
+    .logo-wrap {
+      position: relative;
+      width: 220px; height: 220px;
+      filter: drop-shadow(0 14px 36px rgba(0,0,0,0.6))
+              drop-shadow(0 2px 6px  rgba(0,0,0,0.4));
+    }
+    .logo {
+      position: absolute; inset: 0;
+      width: 220px; height: 220px;
+      border-radius: 56px;
+      display: grid;
+      place-items: center;
+      /* Top-edge highlight gradient (suggests light from above) on top of
+         the dark tint. */
+      background:
+        linear-gradient(180deg,
+          rgba(255, 255, 255, 0.10) 0%,
+          rgba(255, 255, 255, 0.00) 18%,
+          rgba(0, 0, 0, 0.0)        78%,
+          rgba(0, 0, 0, 0.20)       100%),
+        var(--squircle-fill);
+      /* Glassmorphism stack: blur for frost, saturate to pull warm window
+         colour through, brightness for subtle lift. */
+      backdrop-filter: blur(22px) saturate(180%) brightness(1.05);
+      -webkit-backdrop-filter: blur(22px) saturate(180%) brightness(1.05);
+      opacity: 0;
+      transform: scale(0.94);
+      animation: logoIn 700ms cubic-bezier(.2,.7,.2,1) 3000ms forwards;
+      will-change: opacity, transform;
+    }
+    /* Hairline rim + soft inner highlight. */
+    .logo::after {
+      content: '';
+      position: absolute; inset: 0;
+      border-radius: inherit;
+      pointer-events: none;
+      box-shadow:
+        inset 1px 1px 0 rgba(255, 255, 255, 0.18),
+        inset 0 0 0 1.5px var(--squircle-stroke);
+    }
+    @keyframes logoIn {
+      from { opacity: 0; transform: scale(0.94); }
+      to   { opacity: 1; transform: scale(1.00); }
+    }
+
+    /* ³f mark. The "3" stays white, the "f" picks up amber — that's the
+       only colour-coupling on the logo, so it carries weight. */
+    .mark {
+      font-family: 'Stalinist One', system-ui, sans-serif;
+      font-size: 128px;
+      line-height: 1;
+      display: inline-flex;
+      align-items: flex-start;
+      letter-spacing: -0.02em;
+      transform: translateY(4px);
+    }
+    .mark .three {
+      font-size: 0.58em;
+      line-height: 1;
+      margin-right: 0.06em;
+      transform: translateY(0.02em);
+      color: var(--fg);
+    }
+    .mark .f {
+      color: var(--amber);
+      text-shadow: 0 0 24px rgba(245, 181, 68, 0.35); /* soft warm halo */
+    }
+
+    /* ─── Wordmark block ───────────────────────────────────────────────── */
+    .text { display: flex; flex-direction: column; }
+
+    .title {
+      font-family: 'Inter', system-ui, sans-serif;
+      font-size: 72px;
+      font-weight: 600;
+      letter-spacing: -0.018em;
+      line-height: 1.02;
+      text-shadow: var(--text-shadow);
+      opacity: 0;
+      transform: translateY(8px);
+      animation: lineIn 600ms cubic-bezier(.2,.7,.2,1) 3300ms forwards;
+    }
+    .sub {
+      font-family: 'Inter', system-ui, sans-serif;
+      font-size: 24px;
+      font-weight: 400;
+      color: var(--fg-muted);
+      margin-top: 14px;
+      letter-spacing: 0.005em;
+      text-shadow: var(--text-shadow);
+      opacity: 0;
+      transform: translateY(6px);
+      animation: lineIn 500ms cubic-bezier(.2,.7,.2,1) 3700ms forwards;
+    }
+    /* Install CTA — appears late in the loop so anyone watching ~8s in sees
+       it. Lives in the same column as the wordmark, slightly muted. */
+    /* Terminal-style install plate. macOS traffic lights on the left, then
+       the prompt + command. Self-sized (align-self: flex-start). */
+    .install {
+      align-self: flex-start;
+      margin-top: 28px;
+      padding: 11px 16px 11px 14px;
+      background: rgba(10, 12, 16, 0.78);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 10px;
+      backdrop-filter: blur(14px) saturate(140%);
+      -webkit-backdrop-filter: blur(14px) saturate(140%);
+      box-shadow:
+        0 12px 28px rgba(0, 0, 0, 0.45),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06);
+      font-family: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+      font-size: 22px;
+      font-weight: 500;
+      color: var(--fg-muted);
+      display: inline-flex;
+      align-items: center;
+      gap: 14px;
+      opacity: 0;
+      transform: translateY(6px);
+      animation: lineIn 600ms cubic-bezier(.2,.7,.2,1) 3900ms forwards;
+    }
+    .install .prompt { color: var(--amber); }
+    .install .cmd    { color: #d6d8dd; }
+    .install .pkg    { color: var(--amber); }
+
+    @keyframes lineIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+</head>
+<body>
+  <video class="bg" autoplay muted loop playsinline src="../demo-cinematic.mp4"></video>
+
+  <div class="vignette"></div>
+
+  <div class="header">
+    <div class="logo-wrap">
+      <div class="logo">
+        <span class="mark"><span class="three">3</span><span class="f">f</span></span>
+      </div>
+    </div>
+    <div class="text">
+      <div class="title">Three Fenestra</div>
+      <div class="sub">Faux window interiors with interior mapping.</div>
+      <div class="install">
+        <span class="prompt">$</span>
+        <span class="cmd">npm install</span>
+        <span class="pkg">three-fenestra</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="hairline"></div>
+</body>
+</html>

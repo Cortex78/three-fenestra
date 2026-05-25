@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <filter id="dirt" x="0%" y="0%" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.018 0.022" numOctaves="4" seed="7" stitchTiles="stitch" result="t1"/>
+      <feTurbulence type="fractalNoise" baseFrequency="0.11" numOctaves="2" seed="3" stitchTiles="stitch" result="t2"/>
+      <feComposite in="t1" in2="t2" operator="arithmetic" k1="0.6" k2="0.4" k3="0" k4="0" result="mix"/>
+      <feColorMatrix in="mix" type="matrix" values="
+        1.4 0 0 0 -0.2
+        0 1.4 0 0 -0.2
+        0 0 1.4 0 -0.2
+        0 0 0 0  1"/>
+    </filter>
+  </defs>
+  <rect width="512" height="512" fill="#808080" filter="url(#dirt)"/>
+</svg>
