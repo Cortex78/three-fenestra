@@ -91,6 +91,24 @@ const stream = new SupabaseShaderStream(supabase, textureCache, {
 });
 
 // ─────────────────────────────────────────────────────────────
+// Admin role
+// ─────────────────────────────────────────────────────────────
+let isAdmin = false;
+
+async function checkAdminRole(): Promise<void> {
+  try {
+    const { data } = await supabase
+      .from('admin_users')
+      .select('user_id')
+      .maybeSingle();
+    isAdmin = !!data;
+  } catch {
+    isAdmin = false;
+  }
+  document.getElementById('admin-panel')!.classList.toggle('visible', isAdmin);
+}
+
+// ─────────────────────────────────────────────────────────────
 // Scene state
 // ─────────────────────────────────────────────────────────────
 
@@ -125,6 +143,7 @@ loginBtn.addEventListener('click', async () => {
     loginBtn.textContent = 'Sign In';
   } else {
     loginOverlay.remove();
+    await checkAdminRole();
     initScene();
   }
 });
@@ -551,6 +570,70 @@ function currentUserId(): string | null {
   const session = (supabase.auth as unknown as { currentSession?: { user?: { id?: string } } }).currentSession;
   return session?.user?.id ?? null;
 }
+
+// ─────────────────────────────────────────────────────────────
+// Admin operations
+// ─────────────────────────────────────────────────────────────
+
+async function callAdminOp(body: Record<string, unknown>): Promise<void> {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Not signed in');
+
+  const res = await fetch(`${EDGE_FUNCTION_BASE}/admin-operations`, {
+    method:  'POST',
+    headers: {
+      Authorization:  `Bearer ${session.access_token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text);
+  }
+}
+
+document.getElementById('admin-delete-texture-btn')!.addEventListener('click', async () => {
+  if (!selectedWindowId) { alert('Select a window first'); return; }
+  if (!confirm(`Delete ALL textures for this window and reset its shader state?\n\nThis cannot be undone.`)) return;
+
+  const statusEl = document.getElementById('admin-status')!;
+  statusEl.textContent = '⏳ Deleting…';
+  try {
+    await callAdminOp({ action: 'deleteWindowTexture', windowId: selectedWindowId });
+    statusEl.textContent = '✓ Window texture deleted';
+    deselectWindow();
+  } catch (err) {
+    statusEl.textContent = `✗ ${(err as Error).message}`;
+    console.error('Admin delete failed:', err);
+  }
+});
+
+document.getElementById('admin-reset-building-btn')!.addEventListener('click', async () => {
+  if (!confirm(`⚠️ RESET ENTIRE BUILDING?\n\nThis will delete ALL custom textures and shader states for every window in the building.\n\nThis cannot be undone.`)) return;
+
+  const statusEl = document.getElementById('admin-status')!;
+  statusEl.textContent = '⏳ Resetting building…';
+  try {
+    const res = await (async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('Not signed in');
+      const r = await fetch(`${EDGE_FUNCTION_BASE}/admin-operations`, {
+        method:  'POST',
+        headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'resetBuilding', buildingId: BUILDING_ID }),
+      });
+      if (!r.ok) throw new Error(await r.text());
+      return r.json();
+    })();
+    statusEl.textContent = `✓ Reset ${res.deletedStateCount} windows, removed ${res.deletedStoragePaths.length} files`;
+    deselectWindow();
+  } catch (err) {
+    statusEl.textContent = `✗ ${(err as Error).message}`;
+    console.error('Admin reset failed:', err);
+  }
+});
 
 // Resize handler
 window.addEventListener('resize', () => {

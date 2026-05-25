@@ -2,11 +2,15 @@
  * Edge Function: generate-pbr-textures
  *
  * Generates PBR texture layers from a text prompt using Google Gemini
- * gemini-2.0-flash-preview-image-generation via the @google/genai SDK.
+ * gemini-2.0-flash-preview-image-generation via the Generative Language REST API.
  *
- * Supported providers (GENERATOR_PROVIDER env var):
- *   google-gemini   — default, uses gemini-2.0-flash-preview-image-generation
- *   stability-ai    — Stability AI SDXL fallback
+ * KEY FIX: uses EdgeRuntime.waitUntil() so the background generation keeps running
+ * after the HTTP response has been returned (Edge Functions terminate on response
+ * completion without this).
+ *
+ * TEMPLATE GUIDANCE: the default 4×4 rooms atlas (rooms.webp) is sent to Gemini
+ * as a reference inlineData image so outputs are always square, correct-perspective
+ * interior views that match the atlas tile format.
  *
  * Request body (JSON):
  *   {
@@ -23,6 +27,7 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { corsHeaders }  from '../_shared/cors.ts';
+import { ROOMS_TEMPLATE_B64, ROOMS_TEMPLATE_MIME } from '../_shared/rooms-template-b64.ts';
 
 const SUPABASE_URL       = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE_KEY   = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -47,6 +52,10 @@ Deno.serve(async (req: Request) => {
     const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
     if (authErr || !user) {
       return Response.json({ error: 'Invalid token' }, { status: 401, headers: corsHeaders });
+    }
+
+    if (!GEMINI_API_KEY && GENERATOR_PROVIDER === 'google-gemini') {
+      return Response.json({ error: 'GEMINI_API_KEY not configured on this server' }, { status: 503, headers: corsHeaders });
     }
 
     const body = await req.json() as {
@@ -85,8 +94,14 @@ Deno.serve(async (req: Request) => {
       return Response.json({ error: jobError.message }, { status: 500, headers: corsHeaders });
     }
 
-    // Run generation asynchronously (fire-and-forget)
-    processJob(supabase, job.id, user.id, {
+    // ──────────────────────────────────────────────────────
+    // CRITICAL: use EdgeRuntime.waitUntil() so the function
+    // instance stays alive until generation completes, even
+    // after the HTTP response has been sent.  Without this,
+    // Supabase terminates the isolate on response and the
+    // background processJob() never runs.
+    // ──────────────────────────────────────────────────────
+    const background = processJob(supabase, job.id, user.id, {
       prompt: safePrompt,
       negativePrompt,
       layers,
@@ -99,6 +114,10 @@ Deno.serve(async (req: Request) => {
         .update({ status: 'failed', error_message: err.message })
         .eq('id', job.id);
     });
+
+    // Keep the isolate alive
+    (globalThis as unknown as { EdgeRuntime?: { waitUntil(p: Promise<unknown>): void } })
+      .EdgeRuntime?.waitUntil(background);
 
     return Response.json(
       { jobId: job.id, status: 'processing', message: `Generating ${layers.join(', ')} with ${GENERATOR_PROVIDER}` },
@@ -138,12 +157,20 @@ async function processJob(
     const layer       = params.layers[i];
     const layerPrompt = buildLayerPrompt(params.prompt, layer);
 
-    const imageBytes = await generateImage(layerPrompt, params.negativePrompt, params.modelParams);
+    const { bytes, mimeType } = await generateImage(layerPrompt, params.negativePrompt, params.modelParams);
 
-    const storagePath = `generated/${userId}/${jobId}/${layer}.webp`;
+    // Determine extension from returned MIME (Gemini may return PNG or JPEG)
+    const mimeToExt: Record<string, string> = {
+      'image/png':  'png',
+      'image/jpeg': 'jpg',
+      'image/webp': 'webp',
+    };
+    const ext          = mimeToExt[mimeType] ?? 'png';
+    const storagePath  = `generated/${userId}/${jobId}/${layer}.${ext}`;
+
     const { error: uploadErr } = await supabase.storage
       .from('textures')
-      .upload(storagePath, imageBytes, { contentType: 'image/webp', upsert: true });
+      .upload(storagePath, bytes, { contentType: mimeType, upsert: true });
 
     if (uploadErr) throw new Error(`Storage upload failed: ${uploadErr.message}`);
 
@@ -157,7 +184,7 @@ async function processJob(
       texture_type:      layer === 'back' ? 'back' : layer,
       atlas_cols:        1,
       atlas_rows:        1,
-      format:            'webp',
+      format:            ext,
       origin:            'generated',
       generation_job_id: jobId,
     });
@@ -188,7 +215,7 @@ async function generateImage(
   prompt:          string,
   negativePrompt?: string,
   _params:         Record<string, unknown> = {},
-): Promise<Uint8Array> {
+): Promise<{ bytes: Uint8Array; mimeType: string }> {
   switch (GENERATOR_PROVIDER) {
     case 'google-gemini':
       return generateWithGemini(prompt, negativePrompt);
@@ -201,12 +228,17 @@ async function generateImage(
 
 /**
  * Generate an image using gemini-2.0-flash-preview-image-generation.
- * Uses the REST API directly (no Node SDK in Deno Edge Functions).
+ *
+ * Sends the 4×4 rooms atlas (rooms.webp) as an inductive reference image alongside
+ * the text prompt.  This constrains Gemini to always output:
+ *   - Exactly square (1:1) images
+ *   - Correct interior-mapping depth perspective (eye-level view from outside)
+ *   - The same photorealistic quality as the reference atlas tiles
  */
 async function generateWithGemini(
   prompt:          string,
   _negativePrompt?: string,
-): Promise<Uint8Array> {
+): Promise<{ bytes: Uint8Array; mimeType: string }> {
   const model    = 'gemini-2.0-flash-preview-image-generation';
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
 
@@ -217,12 +249,38 @@ async function generateWithGemini(
       contents: [
         {
           role:  'user',
-          parts: [{ text: prompt }],
+          parts: [
+            // Reference atlas: the 4×4 rooms template constrains output format
+            {
+              inlineData: {
+                mimeType: ROOMS_TEMPLATE_MIME,
+                data:     ROOMS_TEMPLATE_B64,
+              },
+            },
+            // Structured text prompt that references the atlas
+            {
+              text: [
+                'You are generating interior room textures for a real-time building shader.',
+                '',
+                'The attached image is a 4×4 atlas of 16 room interiors. Each cell is a',
+                'PERFECTLY SQUARE (1:1 ratio) view of a room interior as seen from outside',
+                'the window — eye-level perspective, correct depth, warm interior lighting.',
+                '',
+                `Generate ONE new room in the EXACT same style and format: ${prompt}`,
+                '',
+                'Requirements (STRICT):',
+                '• Output a single SQUARE image (1:1 aspect ratio, no letterboxing)',
+                '• Interior viewed from outside looking in (window-frame perspective)',
+                '• Photorealistic, matching the reference atlas quality',
+                '• Warm interior lighting with realistic depth visible through the glass',
+                '• No window frames, no UI, just the room interior fill',
+              ].join('\n'),
+            },
+          ],
         },
       ],
       generationConfig: {
         responseModalities: ['IMAGE', 'TEXT'],
-        // Minimal thinking for speed
       },
     }),
   });
@@ -251,13 +309,16 @@ async function generateWithGemini(
     throw new Error(`Gemini returned no image. Text: ${textPart?.text ?? '(none)'}`);
   }
 
-  return Uint8Array.from(atob(imagePart.inlineData.data), (c) => c.charCodeAt(0));
+  return {
+    bytes:    Uint8Array.from(atob(imagePart.inlineData.data), (c) => c.charCodeAt(0)),
+    mimeType: imagePart.inlineData.mimeType,
+  };
 }
 
 async function generateWithStabilityAI(
   prompt:          string,
   negativePrompt?: string,
-): Promise<Uint8Array> {
+): Promise<{ bytes: Uint8Array; mimeType: string }> {
   const apiKey = Deno.env.get('STABILITY_AI_API_KEY') ?? '';
   const res = await fetch(
     'https://api.stability.ai/v1/generation/stable-diffusion-xl-1024-v1-0/text-to-image',
@@ -284,7 +345,10 @@ async function generateWithStabilityAI(
 
   if (!res.ok) throw new Error(`Stability AI error ${res.status}`);
   const json = await res.json() as { artifacts: Array<{ base64: string }> };
-  return Uint8Array.from(atob(json.artifacts[0].base64), (c) => c.charCodeAt(0));
+  return {
+    bytes:    Uint8Array.from(atob(json.artifacts[0].base64), (c) => c.charCodeAt(0)),
+    mimeType: 'image/png',
+  };
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -293,11 +357,19 @@ async function generateWithStabilityAI(
 
 function buildLayerPrompt(base: string, layer: string): string {
   const suffixes: Record<string, string> = {
-    back:      `Interior room view from outside a window. ${base}. Photorealistic, warm interior lighting, depth visible through window glass. Square 1:1 composition.`,
-    front:     `Window curtain or blind. ${base}. Product shot on transparent/white background, showing fabric texture. Square 1:1.`,
-    normal:    `Tangent-space normal map for: ${base}. Blue-purple tones, flat surface, PBR material map, square 1:1.`,
-    roughness: `Grayscale PBR roughness map for: ${base}. White=rough, black=smooth, square 1:1.`,
-    metalness: `Grayscale PBR metalness map for: ${base}. White=metal, black=non-metal, mostly dark for fabric/glass, square 1:1.`,
+    back: base,   // Full context supplied by the system prompt above
+    front:
+      `A semi-transparent window curtain or blind, seen from outside. ${base} style. ` +
+      `White/neutral background behind fabric. Square 1:1, product-shot style.`,
+    normal:
+      `Tangent-space normal map (PBR material): ${base}. ` +
+      `Blue-purple dominant tones as per OpenGL convention. Flat, square 1:1.`,
+    roughness:
+      `Grayscale PBR roughness map: ${base}. White = rough, black = mirror-smooth. ` +
+      `Simple gradient or texture, square 1:1.`,
+    metalness:
+      `Grayscale PBR metalness map: ${base}. White = metallic, black = non-metal. ` +
+      `Mostly black for organic/fabric surfaces. Square 1:1.`,
   };
   return suffixes[layer] ?? base;
 }

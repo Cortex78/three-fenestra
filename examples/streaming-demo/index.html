@@ -192,6 +192,24 @@
       backdrop-filter: blur(10px); z-index: 11;
     }
 
+    /* ── Admin panel ── */
+    #admin-panel {
+      position: fixed; top: 20px; left: 20px;
+      background: var(--panel-bg); border: 1px solid rgba(248,113,113,0.4);
+      border-radius: var(--radius); padding: 14px 16px;
+      font-size: 12px; backdrop-filter: blur(10px);
+      display: none; flex-direction: column; gap: 10px;
+      z-index: 9; min-width: 200px;
+    }
+    #admin-panel.visible { display: flex; }
+    #admin-panel .admin-title {
+      font-size: 11px; font-weight: 700; letter-spacing: 0.1em;
+      text-transform: uppercase; color: var(--danger); margin-bottom: 2px;
+    }
+    #admin-panel .admin-status {
+      font-size: 11px; color: var(--text-dim); min-height: 16px;
+    }
+
     /* ── Login overlay ── */
     #login-overlay {
       position: fixed; inset: 0;
@@ -349,6 +367,14 @@
     <button class="btn btn-danger btn-full" id="release-btn" style="margin-bottom:8px">Release Window</button>
 
   </div>
+</div>
+
+<!-- Admin panel (visible only when signed in as admin) -->
+<div id="admin-panel">
+  <div class="admin-title">⚡ Admin</div>
+  <button class="btn btn-danger btn-full" id="admin-delete-texture-btn" style="font-size:12px;padding:7px 12px">🗑 Delete Selected Window</button>
+  <button class="btn btn-danger btn-full" id="admin-reset-building-btn" style="font-size:12px;padding:7px 12px">💥 Reset Entire Building</button>
+  <div class="admin-status" id="admin-status"></div>
 </div>
 
 <div id="status-badge">
