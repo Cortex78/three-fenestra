@@ -194,15 +194,18 @@ export class TextureStreamCache {
 
   private validateUrl(url: string): void {
     if (!this.allowedOrigins) return;  // no restriction
+
+    let origin: string;
     try {
-      const origin = new URL(url).origin;
-      if (!this.allowedOrigins.includes(origin)) {
-        throw new Error(
-          `TextureStreamCache: URL origin "${origin}" is not in allowedOrigins.`,
-        );
-      }
+      origin = new URL(url).origin;
     } catch {
       throw new Error(`TextureStreamCache: Invalid URL "${url}".`);
+    }
+
+    if (!this.allowedOrigins.includes(origin)) {
+      throw new Error(
+        `TextureStreamCache: URL origin "${origin}" is not in allowedOrigins.`,
+      );
     }
   }
 }

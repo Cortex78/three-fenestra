@@ -7,9 +7,33 @@ inside flat window planes, plus an optional PBR front layer for curtains,
 blinds, mullions, and glass dirt. Works in vanilla Three.js and React
 Three Fiber.
 
+**New in this branch:** a full [live shader streaming layer](#live-shader-streaming) powered by Supabase Realtime + PostGIS — each window in a building can be claimed, customised, and updated in real-time by any authenticated user, with all changes broadcast to every viewer within ~10 ms.
+
 ![Three Fenestra: faux window interiors with interior mapping](assets/header-cinematic.webp)
 
 **Live demo:** [three-fenestra.codedgar.com](https://three-fenestra.codedgar.com)
+
+---
+
+## Table of Contents
+
+1. [Why Three-Fenestra](#why-three-fenestra)
+2. [Install](#install)
+3. [Quick start](#quick-start-vanilla-threejs)
+4. [React Three Fiber](#react-three-fiber)
+5. [API — InteriorMappingMaterial](#api)
+6. [Day / night](#day--night)
+7. [Creating your own atlases](#creating-your-own-atlases)
+8. **[Live shader streaming ✦](#live-shader-streaming)**
+   - [Architecture overview](#architecture-overview)
+   - [Streaming quick start](#streaming-quick-start)
+   - [Supabase setup](#supabase-setup)
+   - [Per-user window customisation](#per-user-window-customisation)
+   - [AI PBR texture generation](#ai-pbr-texture-generation)
+   - [Streaming API reference](#streaming-api-reference)
+9. [Testing](#testing)
+10. [Development](#development)
+11. [Limitations and roadmap](#limitations-and-roadmap)
 
 ---
 
@@ -28,6 +52,7 @@ core and stacks the modern bits on top:
 - A PBR front overlay with optional normal / roughness / metalness atlases
 - A transmission term so curtains can still bleed warm light at night
 - Uniforms wired for a day/night controller (you supply the controller)
+- **A streaming layer so every window's shader state is live-editable by its owner**
 
 It is one material per window mesh. Drop it into any existing scene that
 already uses Three's standard lighting and it composites correctly.
@@ -41,6 +66,12 @@ npm install three-fenestra three
 ```
 
 `three >= 0.150` is a peer dependency.
+
+For the streaming layer also install Supabase:
+
+```bash
+npm install @supabase/supabase-js
+```
 
 ### Starter atlases
 
@@ -85,7 +116,7 @@ const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height), material);
 ```
 
 The interior renders with no front textures. Add the PBR front layer at any
-time — the starter `overlay.png` is a 4×4 curtain atlas you can drop in:
+time — the starter `overlay.webp` is a 4×4 curtain atlas you can drop in:
 
 ```ts
 const overlay = new THREE.TextureLoader().load(overlayUrl);
@@ -168,35 +199,31 @@ All `MeshStandardMaterialParameters` are accepted, plus:
 #### Glass surface (optional)
 
 These give the glass area (where the front layer is transparent) the look of
-a real pane: dirt, refraction, fresnel sheen. All default to zero / off; turn
-on the ones you want.
+a real pane: dirt, refraction, fresnel sheen. All default to zero / off.
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `glassThickness` | `number` | `0` | Apparent glass thickness in plane-local units. Parallax-shifts the front-overlay sample so it appears to sit on the *inside* face of the pane rather than glued to the outside surface. `0` disables. |
-| `refractionStrength` | `number` | `0` | Magnitude (in cell-UV units) of the interior ray-march perturbation driven by `glassDirtMap`. Sells the "looking through real glass" effect. Keep tiny — typical range `0.003`–`0.015`. `0` disables. |
-| `glassDirtMap` | `Texture?` | — | Grayscale noise texture used as the dirt/specular modulator over the glass area, *and* as the source of the refraction perturbation. Centered around `0.5`; values `> 0.5` roughen the glass, `< 0.5` polish it. |
+| `glassThickness` | `number` | `0` | Apparent glass thickness in plane-local units. Parallax-shifts the front-overlay sample so it appears to sit on the *inside* face of the pane. |
+| `refractionStrength` | `number` | `0` | Magnitude (in cell-UV units) of the interior ray-march perturbation driven by `glassDirtMap`. Typical range `0.003`–`0.015`. |
+| `glassDirtMap` | `Texture?` | — | Grayscale noise texture. Centered around `0.5`; values `> 0.5` roughen the glass, `< 0.5` polish it. Also drives refraction perturbation. |
 | `glassDirtStrength` | `number` | `0.35` | How strongly the dirt map modulates roughness on the glass area. |
-| `glassFresnelStrength` | `number` | `0` | Schlick fresnel sheen added to the glass at grazing angles. Primary "this is a pane of glass" cue. Demo uses `~0.5`. |
+| `glassFresnelStrength` | `number` | `0` | Schlick fresnel sheen at grazing angles. Demo uses `~0.5`. |
 | `glassFresnelColor` | `Color` | `(0.85, 0.92, 1.0)` | Tint of the fresnel sheen. Cool white reads as sky reflection. |
-| `glassSmudgeStrength` | `number` | `0` | Additive brightness of dirt visible as smudges on the glass surface. Different from `glassDirtStrength` (roughness modulation). |
+| `glassSmudgeStrength` | `number` | `0` | Additive brightness of dirt visible as smudges on the glass surface. |
 
 ### Runtime setters
 
 ```ts
-// Core knobs
 material.depth              = 0.8;
 material.backScale          = 0.6;
-material.interiorEmissive   = new THREE.Color(2.0, 1.5, 1.0);  // copies into uniform
+material.interiorEmissive   = new THREE.Color(2.0, 1.5, 1.0);
 material.frontTransmission  = 0.10;
 material.frontAlphaBoost    = 1.0;
-
-// Glass-surface knobs
 material.glassThickness       = 0.04;
 material.refractionStrength   = 0.005;
 material.glassDirtStrength    = 0.35;
 material.glassFresnelStrength = 0.5;
-material.glassFresnelColor    = new THREE.Color(0.85, 0.92, 1.0);  // copies into uniform
+material.glassFresnelColor    = new THREE.Color(0.85, 0.92, 1.0);
 material.glassSmudgeStrength  = 0.1;
 
 // Texture swaps (pass null to disable)
@@ -227,18 +254,9 @@ function setMode(p: typeof day) {
 }
 ```
 
-For full "lights on at night," pair this with:
-
-- Reduced scene ambient and sun, **but not to zero**. Building exteriors at
-  night still receive skyglow, streetlights, and reflections. Curtain
-  colours need ambient to read as fabric, not as backlit cutouts.
-- A cool-tinted ambient with a warm interior `emissive` for the classic
-  night-city contrast.
-- `UnrealBloomPass` on the composer (low strength, around `0.4`) to spill
-  the lit-window contribution onto neighbouring pixels.
-
-The bundled `examples/asia-building` demo wires all three; check `main.ts`
-for a working reference.
+For full "lights on at night," pair this with reduced scene ambient and sun,
+a cool-tinted ambient with warm interior `emissive`, and `UnrealBloomPass`
+(strength ~`0.4`) on the composer. See `examples/asia-building/main.ts`.
 
 ---
 
@@ -252,104 +270,267 @@ same room across re-renders.
 
 ### Back atlas (interior rooms)
 
-A grid of square room photos. Each cell is one "room" the ray-march will
-land you inside.
-
 | Spec | Recommendation |
 |---|---|
-| Grid | 4×4 (16 variants) is the sweet spot for masking repetition across hundreds of windows. 2×2 is fine for small scenes. |
-| Cell aspect | Square (1:1). The ray-march assumes a unit cube per cell. |
-| Image size | Power of two (`1024×1024`, `2048×2048`). Lets Three generate mipmaps. |
-| Color space | sRGB. Set `texture.colorSpace = SRGBColorSpace` so sampling converts to linear for PBR. |
-| Edge bleed | The shader insets each cell by `0.001` to prevent bleed; keep ~2 px gutter inside each cell as insurance. |
+| Grid | 4×4 (16 variants) is the sweet spot. |
+| Image size | Power of two (`1024×1024`, `2048×2048`). |
+| Color space | sRGB. Set `texture.colorSpace = SRGBColorSpace`. |
 | Wrap | `ClampToEdgeWrapping` on both axes. |
 | Filter | `LinearMipmapLinearFilter` (min) + `LinearFilter` (mag), `anisotropy: 8+`. |
-| Content | Frame each cell as if looking through a window from outside. Centre the composition; the back wall should fill ~60–70% of the cell (matches default `backScale`). Already-lit photography works best; the shader treats interior pixels as pre-lit. |
+| Content | Frame each cell as if looking through a window from outside. Back wall should fill ~60–70% of the cell. Already-lit photography works best. |
 
 ### Front atlas (curtains, blinds, overlays)
 
-A grid of window dressings. Each cell sits on top of one window using the
-same cell-picking logic.
-
 | Spec | Recommendation |
 |---|---|
-| Grid | Match the variety you want. 4×4 = 16 variants. |
-| Cell aspect | Square. Real windows are not square; the shader stretches the cell to the window's actual aspect, so pick curtain compositions that survive a moderate stretch. |
-| Format | PNG with alpha (RGBA). |
-| Color space | sRGB. |
-| Trim to edge | Each curtain should fill its cell edge-to-edge with no transparent gutter. If your source has padding, trim it:<br>`magick in.png -alpha set -fuzz 10% -bordercolor none -border 1 -trim +repage -resize 256x256^ -gravity center -extent 256x256 out.png` |
-| Alpha encoding | The single biggest authoring decision. Opaque (alpha = 1) is curtain fabric. Transparent (alpha = 0) is the glass area you want the interior to show through. Anywhere between is "semi-sheer" and the shader reads it as fractional transmission. |
+| Format | PNG/WebP with alpha (RGBA). |
+| Alpha encoding | `1` = opaque curtain, `0` = glass, `0.5` = sheer fabric. |
+| Cell aspect | Square; the shader stretches to the window's real aspect. |
 
-#### Sheer and lace curtains
-
-Do not author the fabric itself at low alpha unless you genuinely want light
-to pour through it. Anti-aliased edges are fine; intentional partial
-transparency on every pixel of the curtain is what causes the "windows
-evaporate at night" problem.
-
-If you already have a texture with semi-transparent fabric and want it to
-behave more solidly at night, raise `frontAlphaBoost` (try `2.0`–`2.5`). It
-is a render-time knob; no re-export needed.
-
-#### Front PBR maps (optional)
-
-If you want the curtain fabric to receive proper PBR lighting (fresnel,
-scene light response):
-
-- **Normal atlas:** tangent-space, same grid as the albedo atlas. `RGB`
-  channels = `XYZ`, encoded `[0..1]` mapping to `[-1..1]`.
-- **Roughness atlas:** single-channel; the shader samples `.g`. White =
-  rough, black = mirror.
-- **Metalness atlas:** single-channel; the shader samples `.b`.
-  Curtains and glass are non-metallic, so almost always `0`.
-
-All three must share the front albedo atlas's grid dimensions.
-
-### Window mesh setup
-
-Each window is a `PlaneGeometry` sized to the real window dimensions.
-Three things every material needs:
-
-1. **`planeSize`**: the geometry's `(width, height)` as a `Vector2`. The
-   shader uses it to normalise object-space `position` into local UV.
-2. **`windowId`**: a `Vector3` unique per window. The window's centre in
-   world space is a natural choice.
-3. **The plane's local +Z** must be the outward-facing normal. If your
-   geometry comes from a model with arbitrary orientation, build a basis
-   from `(right, up, normal)` and apply it via
-   `mesh.quaternion.setFromRotationMatrix(makeBasis(right, up, normal))`.
-
-See `examples/asia-building/main.ts` for a complete example pulling
-per-window data from a JSON descriptor.
+For sheer curtains that go solid at night, raise `frontAlphaBoost` to
+`2.0`–`2.5` at runtime. No re-export needed.
 
 ### Helper scripts
 
-The `examples/asia-building/tools/` folder has small Python scripts used
-to build the demo's atlases:
-
-- `detect_windows.py`, `extract_windows.py`: pull window crops from a
-  facade photo
-- `analyze_atlas.py`: sanity-check cell layout and channel content
-- `glass_dirt.svg`: source for the glass-dirt overlay used in the demo
-
-They are unsupported, not packaged, and exist as references. Adapt or
-ignore.
+See `examples/asia-building/tools/` for Python helpers:
+- `extract_windows.py` — Blender script; extracts window frames from a GLTF as a `windows.json`
+- `detect_windows.py` — finds window rects in a facade photograph
+- `analyze_atlas.py` — reverse-engineers `backScale` / `depth` from room photography
 
 ---
 
-## Limitations and roadmap
+## Live shader streaming
 
-- **No envmap / cubemap reflections** on the glass area. Would require
-  fresnel-modulated env sampling.
-- **No refraction distortion.** A planned opt-in `refractionStrength`
-  (default `0`) would perturb the ray direction using the front normal map.
-- **One material per window mesh.** Each window carries its own
-  `windowId` / `planeSize` uniforms. For very high window counts, an
-  instanced-attribute variant (single material, per-instance attributes)
-  is on the radar.
-- **Pre-lit interior.** The atlas is treated as already-shaded photography;
-  scene lights do not relight the interior. This is by design; relighting
-  fake rooms would defeat the cost saving the technique exists for.
+> **Full documentation:** [`docs/streaming.md`](docs/streaming.md)  
+> **Setup guide:** [`docs/supabase-setup.md`](docs/supabase-setup.md)  
+> **Architecture deep-dive:** [`ARCHITECTURE.md`](ARCHITECTURE.md)
+
+The streaming layer turns a static building scene into a live multi-user
+experience: any authenticated user can own a window, upload custom room
+textures or generate PBR materials via AI, and see their changes broadcast
+to every other viewer in real-time — all backed by Supabase Realtime and
+PostGIS.
+
+### Architecture overview
+
+```
+Browser A (owner)            Supabase                  Browser B (viewer)
+──────────────────           ────────                  ─────────────────
+drag slider                                             watching building
+  │                                                          │
+  ├─ broadcastUniformPreview ──► broadcast channel ──────────► applyUniformBroadcast()
+  │   (ephemeral, no DB)         (< 5 ms)                   no frame drop
+  │
+  ├─ click "Publish"
+  │   └─ updateWindowState()
+  │       └─► update_window_state() RPC (Postgres, atomic)
+  │             SELECT...FOR UPDATE + version check
+  │               └─► Supabase Realtime fires UPDATE event ──► applyRow()
+  │                   (window_states table)                      ├─ uniforms: sync
+  │                                                              └─ textures: async
+  │                                                                  TextureStreamCache
+```
+
+**Two channels per building:**
+- `postgres_changes` on `window_states` — persistent state (DB writes)
+- `broadcast` — ephemeral slider preview before committing
+
+**Atomicity** is guaranteed by a PostgreSQL stored procedure that uses
+`SELECT…FOR UPDATE` locking and raises `serialization_failure (40001)` on
+version mismatch, retried automatically with exponential back-off.
+
+**PostGIS** stores each building's geographic location + polygon footprint and
+each window's 3D position in ECEF coordinates, enabling spatial queries like
+"find all buildings within 500 m" or "how many windows are lit per floor."
+
+### Streaming quick start
+
+```ts
+import { createClient }        from '@supabase/supabase-js';
+import { TextureStreamCache, SupabaseShaderStream } from 'three-fenestra/streaming';
+
+const supabase     = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const textureCache = new TextureStreamCache({ maxEntries: 64 });
+const stream       = new SupabaseShaderStream(supabase, textureCache);
+
+// Subscribe to a building — fires hydration callback once,
+// then keeps all window materials in sync via Realtime.
+await stream.subscribeTo(MY_BUILDING_ID, (rows) => {
+  for (const row of rows) {
+    // Build a material from the hydration row
+    const material = SupabaseShaderStream.buildMaterial(row, defaultAtlas);
+    const mesh = buildWindowMesh(row, material);
+
+    // Register with the stream — future DB changes auto-apply to this material
+    stream.registerMaterial(row.window_uuid, material, row);
+  }
+});
+```
+
+### Supabase setup
+
+See [`docs/supabase-setup.md`](docs/supabase-setup.md) for the full walkthrough.
+Quick summary:
+
+```bash
+# 1. Install Supabase CLI
+npm install -g supabase
+
+# 2. Link to your project
+supabase login
+supabase link --project-ref <your-project-ref>
+
+# 3. Apply all migrations (PostGIS schema + RLS + Realtime)
+supabase db push
+
+# 4. Deploy Edge Functions
+supabase functions deploy generate-pbr-textures
+supabase functions deploy process-texture-upload
+supabase functions deploy window-state-sync
+
+# 5. Set AI provider secret (optional — only needed for AI generation)
+supabase secrets set GOOGLE_IMAGEN_API_KEY=your-key-here
+# or for Stability AI:
+supabase secrets set STABILITY_AI_API_KEY=your-key-here GENERATOR_PROVIDER=stability-ai
+```
+
+### Per-user window customisation
+
+```ts
+// Claim an unowned window
+await stream.claimWindow(windowId);
+
+// Broadcast a live slider preview (no DB write, visible to all viewers)
+stream.broadcastUniformPreview(buildingId, windowId, {
+  depth:             1.5,
+  interiorEmissiveR: 2.0,
+  interiorEmissiveG: 1.6,
+  interiorEmissiveB: 1.1,
+});
+
+// Commit to the database atomically (Realtime then broadcasts to all)
+await stream.updateWindowState(windowId, {
+  depth:             1.5,
+  interiorEmissiveR: 2.0,
+  interiorEmissiveG: 1.6,
+  interiorEmissiveB: 1.1,
+}, expectedVersion);   // pass version for optimistic locking
+
+// Upload a custom room texture
+const response = await fetch(`${SUPABASE_URL}/functions/v1/process-texture-upload`, {
+  method: 'POST',
+  headers: { Authorization: `Bearer ${accessToken}` },
+  body: formDataWithFile,
+});
+const { url } = await response.json();
+await stream.updateWindowState(windowId, { back_atlas_url: url, back_atlas_cols: 1, back_atlas_rows: 1 });
+
+// Release ownership (resets to building defaults)
+await stream.releaseWindow(windowId);
+```
+
+### AI PBR texture generation
+
+```ts
+// Submit a generation job (runs async via Edge Function)
+const res = await fetch(`${SUPABASE_URL}/functions/v1/generate-pbr-textures`, {
+  method: 'POST',
+  headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    windowId: myWindowId,
+    prompt:   'A cosy Tokyo apartment at night, warm lamp light, bookshelf',
+    layers:   ['back', 'front', 'normal', 'roughness'],   // PBR set
+  }),
+});
+const { jobId } = await res.json();
+
+// Subscribe to job progress via Supabase Realtime
+supabase.channel(`job:${jobId}`)
+  .on('postgres_changes', { event: 'UPDATE', table: 'shader_generation_jobs', filter: `id=eq.${jobId}` },
+    (payload) => {
+      if (payload.new.status === 'completed') {
+        stream.updateWindowState(myWindowId, {
+          back_atlas_url:   payload.new.result_urls.back,
+          front_atlas_url:  payload.new.result_urls.front,
+          front_normal_url: payload.new.result_urls.normal,
+        });
+      }
+    })
+  .subscribe();
+```
+
+Supported AI providers (set `GENERATOR_PROVIDER` environment variable):
+
+| Provider | Env var value | Quality |
+|---|---|---|
+| Google Imagen 3 | `google-imagen-3` (default) | Best photorealism |
+| Stability AI SDXL | `stability-ai` | Open weights, self-hostable |
+
+### Streaming API reference
+
+See [`docs/streaming.md`](docs/streaming.md) for the complete API reference
+for `TextureStreamCache`, `WindowStateManager`, and `SupabaseShaderStream`.
+
+---
+
+## Testing
+
+### Type checking
+
+```bash
+npm run typecheck       # runs tsc --noEmit across src/ + examples/
+```
+
+### Unit tests
+
+```bash
+npm test                # vitest — runs src/streaming/__tests__/
+npm run test:watch      # watch mode
+npm run test:coverage   # with V8 coverage report
+```
+
+The unit tests cover:
+- `types.ts` — `rowToUniformSnapshot`, `rowToTextureSnapshot`, `DEFAULT_WINDOW_STATE`
+- `TextureStreamCache` — LRU eviction, in-flight deduplication, URL allowlist, `dispose`
+
+### Streaming demo (browser / manual)
+
+```bash
+# Copy .env template and fill in your Supabase credentials
+cp examples/streaming-demo/.env.example examples/streaming-demo/.env.local
+
+# Start the streaming demo dev server (port 5174)
+npm run dev:streaming
+
+# Or run both the classic demo and streaming demo simultaneously:
+npm run dev          # port 5173 — asia-building (offline, no Supabase needed)
+npm run dev:streaming # port 5174 — streaming demo (requires Supabase)
+```
+
+### Supabase local stack (full end-to-end without a cloud project)
+
+```bash
+# Start the full local Supabase stack (Postgres + Realtime + Storage + Edge Functions)
+supabase start
+
+# Apply migrations to the local DB
+supabase db reset     # drops + re-creates, applies all migrations/ + seed.sql
+
+# Serve Edge Functions locally with hot-reload
+supabase functions serve --env-file supabase/.env.local
+
+# Run migrations against the local stack and inspect the schema
+supabase db diff      # shows pending migration diff
+supabase studio       # opens Supabase Studio at localhost:54323
+```
+
+When `supabase start` is running, set these in your `.env.local`:
+
+```
+VITE_SUPABASE_URL=http://localhost:54321
+VITE_SUPABASE_ANON_KEY=<printed by supabase start>
+VITE_BUILDING_ID=a1b2c3d4-e5f6-7890-abcd-ef1234567890
+```
 
 ---
 
@@ -358,18 +539,61 @@ ignore.
 ```bash
 npm install
 npm run dev          # serves examples/asia-building on :5173
+npm run dev:streaming # serves examples/streaming-demo on :5174
 npm run build        # produces dist/ (the publishable package)
-npm run build:demo   # produces dist-demo/ (static export of the demo)
-npm run typecheck
+npm run build:demo   # produces dist-demo/ (static export of asia-building)
+npm run typecheck    # TypeScript no-emit check
+npm test             # Vitest unit tests
 ```
 
 ### Examples
 
-- `examples/asia-building/` — the full demo: 160 windows on a real building,
-  cinematic camera, day/night palette, glass dirt, PBR curtains. What
-  `npm run dev` serves and what powers the [live demo](https://three-fenestra.codedgar.com).
-- `examples/minimal/` — single window plane, ~60 lines. The shortest
-  runnable example for understanding the API surface.
+| Example | What it shows |
+|---|---|
+| `examples/minimal/` | ~60 lines. Shortest path to a rendered window. |
+| `examples/asia-building/` | Full demo: 160 windows, cinematic camera, day/night, glass dirt, PBR curtains. What `npm run dev` serves. |
+| `examples/streaming-demo/` | **New.** Full streaming demo: auth, window selection, Realtime sync, texture upload, AI generation, presence avatars. |
+
+### New source files
+
+```
+src/streaming/
+├── types.ts              — shared DB row types + conversion helpers
+├── TextureStreamCache.ts — LRU texture loader with GPU-safe eviction
+├── WindowStateManager.ts — per-window state FSM; routes DB updates to material
+├── SupabaseShaderStream.ts — Realtime integration; hydration + broadcast + presence
+└── index.ts              — streaming sub-path re-exports
+
+supabase/
+├── migrations/
+│   ├── 001_postgis_setup.sql      — PostGIS + extensions
+│   ├── 002_buildings_windows.sql  — buildings (geography) + windows (PointZ)
+│   ├── 003_window_states.sql      — shader uniforms table + atomic upsert RPC
+│   ├── 004_rls_policies.sql       — Row Level Security
+│   └── 005_realtime_and_views.sql — Realtime publication + denorm views
+├── functions/
+│   ├── generate-pbr-textures/  — Google Imagen / Stability AI generation
+│   ├── process-texture-upload/ — multipart upload handler
+│   └── window-state-sync/      — atomic state commit endpoint
+└── seed.sql                    — demo building + placeholder window
+```
+
+---
+
+## Limitations and roadmap
+
+- **No envmap / cubemap reflections** on the glass area.
+- **One material per window mesh.** An instanced-attribute variant for very
+  high window counts is on the roadmap.
+- **Pre-lit interior.** The atlas is always treated as already-shaded
+  photography; scene lights do not relight the interior. This is by design.
+- **Streaming: Edge Functions require a Supabase project** (or local CLI stack).
+  The base `InteriorMappingMaterial` has no external runtime dependencies.
+- **AI generation is async** and depends on third-party API quotas. For
+  production use, add a credits/rate-limit table.
+
+See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full streaming roadmap (Phase 2:
+instanced renderer; Phase 3: delta compression, self-hosted deployment).
 
 ---
 
@@ -377,8 +601,9 @@ npm run typecheck
 
 - Joost van Dongen, *Interior Mapping: A new technique for rendering
   realistic buildings* (2008).
-- The Three.js team for `MeshStandardMaterial` and the onBeforeCompile
+- The Three.js team for `MeshStandardMaterial` and the `onBeforeCompile`
   hook this material extends.
+- Supabase for the Realtime + PostGIS platform underpinning the streaming layer.
 
 ---
 
